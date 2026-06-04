@@ -1,0 +1,46 @@
+services:
+  # 1. PostgreSQL 데이터베이스 컨테이너 
+  db:
+    image: postgres:15-alpine
+    container_name: soundspace-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: soundspace
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 2. Node.js 백엔드 API 서버 컨테이너 
+  backend:
+    build: ./backend
+    container_name: soundspace-backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/soundspace
+    ports:
+      - "5000:5000"
+    depends_on:
+      - db
+
+  # 3. 리액트 프론트엔드 컨테이너 
+  frontend:
+    build: ./frontend
+    container_name: soundspace-frontend
+    ports:
+      - "3000:3000"
+
+  # 4. 최전방 리버스 프록시 Nginx 컨테이너 [cite: 27, 28]
+  nginx:
+    image: nginx:alpine
+    container_name: soundspace-nginx
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    ports:
+      - "80:80"
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  pgdata:
