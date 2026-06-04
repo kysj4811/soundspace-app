@@ -12,7 +12,7 @@ function App() {
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const requestRef = useRef<number>();
 
-  // 💾 [Web Storage] 로컬/세션 스토리지 상태
+  // 💾 상태 관리
   const [volume, setVolume] = useState<number>(() => Number(localStorage.getItem('soundspace-volume')) || 50);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => (localStorage.getItem('soundspace-theme') || 'dark') === 'dark');
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(() => Number(sessionStorage.getItem('soundspace-current-index')) || 0);
@@ -24,12 +24,10 @@ function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(180);
 
-  // 📁 플레이리스트 상태
   const [playlists, setPlaylists] = useState<{ id: number, name: string }[]>([
     { id: 1, name: "과제용 BGM 모음" }
   ]);
 
-  // 📝 BGM 트랙 노트 (가사 대신 재생 구간별 곡 해설)
   const trackNotes = [
     { time: 0, text: "잔잔한 멜로디로 시작됩니다 🎵" },
     { time: 10, text: "리듬악기가 서서히 더해지는 구간" },
@@ -74,16 +72,15 @@ function App() {
       let x = 0;
 
       for (let i = 0; i < bufferLength; i++) {
-        barHeight = dataArray[i] / 1.5; // 바 높이 조절
+        barHeight = dataArray[i]; // 높이 조절
         
-        // 테마에 따른 그라데이션 색상
         const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
         if (isDarkMode) {
-          gradient.addColorStop(0, 'rgba(14, 165, 233, 0.2)'); // sky-500 투명
-          gradient.addColorStop(1, 'rgba(56, 189, 248, 0.8)'); // sky-400
+          gradient.addColorStop(0, 'rgba(14, 165, 233, 0.2)');
+          gradient.addColorStop(1, 'rgba(56, 189, 248, 0.9)');
         } else {
-          gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)'); // indigo-500 투명
-          gradient.addColorStop(1, 'rgba(99, 102, 241, 0.6)');
+          gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
+          gradient.addColorStop(1, 'rgba(99, 102, 241, 0.8)');
         }
 
         ctx.fillStyle = gradient;
@@ -94,24 +91,28 @@ function App() {
     draw();
   };
 
+  // 🎵 오디오 초기화 및 재생
   const togglePlay = async () => {
     if (!audioRef.current) return;
 
-    // 브라우저 정책상 사용자가 버튼을 눌렀을 때 AudioContext를 초기화해야 합니다.
+    // 리액트 환경에서 오디오 컨텍스트가 중복 생성되지 않도록 안전 장치 마련
     if (!audioContextRef.current) {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      audioContextRef.current = new AudioContext();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 128; // 막대 개수 조절
-
-      sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
-      sourceRef.current.connect(analyserRef.current);
-      analyserRef.current.connect(audioContextRef.current.destination);
-      
-      drawVisualizer();
+      try {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        audioContextRef.current = new AudioContext();
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        analyserRef.current.fftSize = 128; // 막대 개수
+        
+        sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
+        sourceRef.current.connect(analyserRef.current);
+        analyserRef.current.connect(audioContextRef.current.destination);
+        drawVisualizer();
+      } catch (err) {
+        console.error("비주얼라이저 초기화 실패:", err);
+      }
     }
 
-    if (audioContextRef.current.state === 'suspended') {
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
       await audioContextRef.current.resume();
     }
 
@@ -157,7 +158,7 @@ function App() {
 
   return (
     <div className={`flex flex-col h-screen font-sans select-none transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-      <audio ref={audioRef} src={`/${currentSong.fileName}`} onTimeUpdate={handleTimeUpdate} crossOrigin="anonymous" />
+      <audio ref={audioRef} src={`/${currentSong.fileName}`} onTimeUpdate={handleTimeUpdate} />
 
       <div className="flex flex-1 h-[calc(100vh-90px)] overflow-hidden">
         {/* 사이드바 */}
@@ -198,10 +199,10 @@ function App() {
         <main className="flex-1 p-8 overflow-y-auto flex flex-col">
           <header className="mb-8"><h1 className="text-2xl font-bold">안녕하세요, 승준님 👋</h1></header>
 
-          <section className="mb-8 flex gap-8 h-64">
-            {/* 좌측: 현재 곡 정보 */}
+          <section className="mb-8 flex gap-8 h-72">
+            {/* 좌측: 현재 재생 중인 곡 정보 */}
             <div className={`p-6 rounded-2xl border w-1/3 flex flex-col justify-center gap-6 shadow-sm ${isDarkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
-              <div className="w-16 h-16 bg-gradient-to-br from-sky-400 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg"><Music size={28} className="text-white" /></div>
+              <div className="w-20 h-20 bg-gradient-to-br from-sky-400 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg"><Music size={32} className="text-white" /></div>
               <div>
                 <p className="text-sm font-semibold text-sky-500 mb-1">현재 재생 중</p>
                 <h3 className="font-bold text-2xl mb-1">{currentSong.title}</h3>
@@ -209,24 +210,26 @@ function App() {
               </div>
             </div>
 
-            {/* 우측: 캔버스 비주얼라이저 + 트랙 노트 오버레이 UI */}
-            <div className={`relative flex-1 rounded-2xl border overflow-hidden shadow-inner ${isDarkMode ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-              {/* 배경: 오디오 비주얼라이저 */}
-              <canvas ref={canvasRef} className="absolute bottom-0 left-0 w-full h-full opacity-60" width={600} height={200}></canvas>
+            {/* 우측: 상단 가사 + 하단 비주얼라이저 분리형 UI */}
+            <div className={`flex flex-col flex-1 rounded-2xl border shadow-inner overflow-hidden ${isDarkMode ? 'bg-slate-900/30 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
               
-              {/* 전경: 시간 동기화 트랙 노트 */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center">
-                <div className="flex flex-col gap-4 transform transition-transform duration-500">
-                  {trackNotes.map((note, index) => {
-                    const isCurrent = currentTime >= note.time && (index === trackNotes.length - 1 || currentTime < trackNotes[index + 1].time);
-                    if (!isCurrent) return null; // 현재 시간에 맞는 텍스트만 중앙에 표시
-                    return (
-                      <p key={index} className="text-2xl font-bold text-sky-500 drop-shadow-md animate-fade-in-up">
-                        {note.text}
-                      </p>
-                    );
-                  })}
-                </div>
+              {/* 구역 1: 가사창 (위쪽) */}
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+                {trackNotes.map((note, index) => {
+                  const isCurrent = currentTime >= note.time && (index === trackNotes.length - 1 || currentTime < trackNotes[index + 1].time);
+                  if (!isCurrent) return null;
+                  return (
+                    <p key={index} className="text-xl font-bold text-sky-500 drop-shadow-sm animate-fade-in-up">
+                      {note.text}
+                    </p>
+                  );
+                })}
+              </div>
+
+              {/* 구역 2: 비주얼라이저 전용 구역 (아래쪽) */}
+              <div className="h-28 w-full relative">
+                {/* 캔버스의 실제 픽셀 크기를 넉넉하게 잡고 부모 요소에 꽉 차게 만듭니다 */}
+                <canvas ref={canvasRef} width={800} height={150} className="absolute bottom-0 w-full h-full"></canvas>
               </div>
             </div>
           </section>
