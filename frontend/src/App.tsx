@@ -4,58 +4,46 @@ import { Play, Pause, SkipForward, SkipBack, Volume2, ListMusic, Home, Search, L
 
 function App() {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // 🎛️ Web Audio API 관련 참조 (비주얼라이저용)
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const requestRef = useRef<number>();
 
-  // 💾 [Web Storage] 로컬 스토리지 (볼륨, 테마)
-  const [volume, setVolume] = useState<number>(() => {
-    const saved = localStorage.getItem('soundspace-volume');
-    return saved ? Number(saved) : 50;
-  });
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('soundspace-theme');
-    return saved ? saved === 'dark' : true;
-  });
-
-  // 💾 [Web Storage] 세션 스토리지 (재생 상태)
-  const [currentSongIndex, setCurrentSongIndex] = useState<number>(() => {
-    const saved = sessionStorage.getItem('soundspace-current-index');
-    return saved ? Number(saved) : 0;
-  });
+  // 💾 [Web Storage] 로컬/세션 스토리지 상태
+  const [volume, setVolume] = useState<number>(() => Number(localStorage.getItem('soundspace-volume')) || 50);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => (localStorage.getItem('soundspace-theme') || 'dark') === 'dark');
+  const [currentSongIndex, setCurrentSongIndex] = useState<number>(() => Number(sessionStorage.getItem('soundspace-current-index')) || 0);
   const [isShuffle, setIsShuffle] = useState<boolean>(() => sessionStorage.getItem('soundspace-shuffle') === 'true');
   const [isRepeat, setIsRepeat] = useState<boolean>(() => sessionStorage.getItem('soundspace-repeat') === 'true');
 
-  // 🎵 상태 관리
   const [songs, setSongs] = useState<any[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(180); // 임시 곡 길이
+  const [duration, setDuration] = useState(180);
 
-  // 📁 플레이리스트 CRUD 상태 관리
+  // 📁 플레이리스트 상태
   const [playlists, setPlaylists] = useState<{ id: number, name: string }[]>([
-    { id: 1, name: "내가 좋아하는 노래" }
+    { id: 1, name: "과제용 BGM 모음" }
   ]);
 
-  // 📝 가사 더미 데이터 (시간에 따른 하이라이트용)
-  const lyricsData = [
-    { time: 0, text: "음악이 시작됩니다..." },
-    { time: 5, text: "이곳에 첫 번째 가사가 나옵니다." },
-    { time: 10, text: "웹 브라우저에서 끊김 없이 음악을 듣고," },
-    { time: 15, text: "나만의 플레이리스트를 관리할 수 있는" },
-    { time: 20, text: "개인 맞춤형 스트리밍 앱, SoundSpace!" },
-    { time: 25, text: "코드가 너무 아름답게 짜여져 있네요." },
-    { time: 30, text: "만점짜리 A+ 과제가 확실합니다." },
-    { time: 40, text: "점점 빠져드는 음악의 매력 속으로" },
-    { time: 50, text: "간주 중..." },
-    { time: 60, text: "이제 두 번째 소절이 시작됩니다." }
+  // 📝 BGM 트랙 노트 (가사 대신 재생 구간별 곡 해설)
+  const trackNotes = [
+    { time: 0, text: "잔잔한 멜로디로 시작됩니다 🎵" },
+    { time: 10, text: "리듬악기가 서서히 더해지는 구간" },
+    { time: 20, text: "메인 테마가 전개됩니다 🚀" },
+    { time: 35, text: "사운드가 더욱 풍성해지는 하이라이트!" },
+    { time: 50, text: "잠시 쉬어가는 브릿지 구간..." },
+    { time: 65, text: "다시 한번 강렬하게 터지는 비트 💥" },
+    { time: 80, text: "아웃트로를 향해 달려갑니다" }
   ];
 
-  // 백엔드 데이터 패칭 (Axios 활용)
   useEffect(() => {
-    axios.get('/api/songs')
-      .then((res) => setSongs(res.data))
-      .catch((err) => console.error("데이터 통신 실패:", err));
+    axios.get('/api/songs').then((res) => setSongs(res.data)).catch((err) => console.error(err));
   }, []);
 
-  // Web Storage 자동 저장
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume / 100;
     localStorage.setItem('soundspace-volume', volume.toString());
@@ -65,9 +53,68 @@ function App() {
   useEffect(() => sessionStorage.setItem('soundspace-shuffle', isShuffle.toString()), [isShuffle]);
   useEffect(() => sessionStorage.setItem('soundspace-repeat', isRepeat.toString()), [isRepeat]);
 
-  // 재생 컨트롤
+  // 🎨 비주얼라이저 그리기 함수
+  const drawVisualizer = () => {
+    if (!analyserRef.current || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const analyser = analyserRef.current;
+    if (!ctx) return;
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const draw = () => {
+      requestRef.current = requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(dataArray);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const barWidth = (canvas.width / bufferLength) * 2.5;
+      let barHeight;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        barHeight = dataArray[i] / 1.5; // 바 높이 조절
+        
+        // 테마에 따른 그라데이션 색상
+        const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+        if (isDarkMode) {
+          gradient.addColorStop(0, 'rgba(14, 165, 233, 0.2)'); // sky-500 투명
+          gradient.addColorStop(1, 'rgba(56, 189, 248, 0.8)'); // sky-400
+        } else {
+          gradient.addColorStop(0, 'rgba(99, 102, 241, 0.2)'); // indigo-500 투명
+          gradient.addColorStop(1, 'rgba(99, 102, 241, 0.6)');
+        }
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+        x += barWidth + 2;
+      }
+    };
+    draw();
+  };
+
   const togglePlay = async () => {
     if (!audioRef.current) return;
+
+    // 브라우저 정책상 사용자가 버튼을 눌렀을 때 AudioContext를 초기화해야 합니다.
+    if (!audioContextRef.current) {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      audioContextRef.current = new AudioContext();
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 128; // 막대 개수 조절
+
+      sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
+      sourceRef.current.connect(analyserRef.current);
+      analyserRef.current.connect(audioContextRef.current.destination);
+      
+      drawVisualizer();
+    }
+
+    if (audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume();
+    }
+
     try {
       if (isPlaying) {
         audioRef.current.pause();
@@ -94,7 +141,6 @@ function App() {
     }
   };
 
-  // 📂 플레이리스트 CRUD 함수들
   const createPlaylist = () => {
     const name = prompt("새로운 플레이리스트 이름을 입력하세요:");
     if (name) setPlaylists([...playlists, { id: Date.now(), name }]);
@@ -104,16 +150,14 @@ function App() {
     if (name) setPlaylists(playlists.map(p => p.id === id ? { ...p, name } : p));
   };
   const deletePlaylist = (id: number) => {
-    if (window.confirm("이 플레이리스트를 삭제하시겠습니까?")) {
-      setPlaylists(playlists.filter(p => p.id !== id));
-    }
+    if (window.confirm("이 플레이리스트를 삭제하시겠습니까?")) setPlaylists(playlists.filter(p => p.id !== id));
   };
 
   const currentSong = songs[currentSongIndex] || { title: "로딩 중...", artist: "...", fileName: "" };
 
   return (
     <div className={`flex flex-col h-screen font-sans select-none transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-      <audio ref={audioRef} src={`/${currentSong.fileName}`} onTimeUpdate={handleTimeUpdate} />
+      <audio ref={audioRef} src={`/${currentSong.fileName}`} onTimeUpdate={handleTimeUpdate} crossOrigin="anonymous" />
 
       <div className="flex flex-1 h-[calc(100vh-90px)] overflow-hidden">
         {/* 사이드바 */}
@@ -124,20 +168,17 @@ function App() {
               {isDarkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} className="text-slate-600" />}
             </button>
           </div>
-          
           <nav className={`flex flex-col gap-4 font-medium text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
             <a href="#" className={`flex items-center gap-3 transition ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}><Home size={20} /> 홈</a>
             <a href="#" className="flex items-center gap-3 hover:text-sky-500 transition"><Search size={20} /> 검색하기</a>
             <a href="#" className="flex items-center gap-3 hover:text-sky-500 transition"><Library size={20} /> 내 라이브러리</a>
           </nav>
-
           <hr className={isDarkMode ? 'border-slate-800' : 'border-slate-200'} />
           
-          {/* 📂 플레이리스트 CRUD 구역 */}
           <div className="flex flex-col gap-3 flex-1 overflow-y-auto">
             <div className="flex items-center justify-between text-slate-400">
               <p className="text-xs font-semibold uppercase tracking-wider">내 플레이리스트</p>
-              <button onClick={createPlaylist} className="hover:text-sky-500 transition" title="새 플레이리스트 만들기"><Plus size={16} /></button>
+              <button onClick={createPlaylist} className="hover:text-sky-500 transition"><Plus size={16} /></button>
             </div>
             <div className="flex flex-col gap-2 text-sm">
               {playlists.map((playlist) => (
@@ -154,38 +195,45 @@ function App() {
         </aside>
 
         {/* 메인 화면 */}
-        <main className="flex-1 p-8 overflow-y-auto">
+        <main className="flex-1 p-8 overflow-y-auto flex flex-col">
           <header className="mb-8"><h1 className="text-2xl font-bold">안녕하세요, 승준님 👋</h1></header>
 
-          <section className="mb-8 flex gap-8">
-            <div className={`p-6 rounded-2xl border w-1/2 flex items-center gap-6 shadow-sm ${isDarkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
-              <div className="w-24 h-24 bg-gradient-to-br from-sky-400 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg"><Music size={40} className="text-white" /></div>
+          <section className="mb-8 flex gap-8 h-64">
+            {/* 좌측: 현재 곡 정보 */}
+            <div className={`p-6 rounded-2xl border w-1/3 flex flex-col justify-center gap-6 shadow-sm ${isDarkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'}`}>
+              <div className="w-16 h-16 bg-gradient-to-br from-sky-400 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg"><Music size={28} className="text-white" /></div>
               <div>
-                <p className="text-sm font-semibold text-sky-500 mb-1">현재 재생 중인 트랙</p>
+                <p className="text-sm font-semibold text-sky-500 mb-1">현재 재생 중</p>
                 <h3 className="font-bold text-2xl mb-1">{currentSong.title}</h3>
                 <p className="text-slate-400">{currentSong.artist}</p>
               </div>
             </div>
 
-            {/* 🎤 실시간 가사 보기 구역 */}
-            <div className={`p-6 rounded-2xl border w-1/2 h-44 overflow-y-auto relative ${isDarkMode ? 'bg-slate-900/30 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-              <h2 className="text-sm font-semibold text-slate-400 mb-4 sticky top-0 backdrop-blur-sm z-10">실시간 가사 보기</h2>
-              <div className="flex flex-col gap-3 text-center text-lg font-medium">
-                {lyricsData.map((line, index) => {
-                  const isCurrent = currentTime >= line.time && (index === lyricsData.length - 1 || currentTime < lyricsData[index + 1].time);
-                  return (
-                    <p key={index} className={`transition-all duration-300 ${isCurrent ? 'text-sky-500 scale-105 font-bold' : isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-                      {line.text}
-                    </p>
-                  );
-                })}
+            {/* 우측: 캔버스 비주얼라이저 + 트랙 노트 오버레이 UI */}
+            <div className={`relative flex-1 rounded-2xl border overflow-hidden shadow-inner ${isDarkMode ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+              {/* 배경: 오디오 비주얼라이저 */}
+              <canvas ref={canvasRef} className="absolute bottom-0 left-0 w-full h-full opacity-60" width={600} height={200}></canvas>
+              
+              {/* 전경: 시간 동기화 트랙 노트 */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center">
+                <div className="flex flex-col gap-4 transform transition-transform duration-500">
+                  {trackNotes.map((note, index) => {
+                    const isCurrent = currentTime >= note.time && (index === trackNotes.length - 1 || currentTime < trackNotes[index + 1].time);
+                    if (!isCurrent) return null; // 현재 시간에 맞는 텍스트만 중앙에 표시
+                    return (
+                      <p key={index} className="text-2xl font-bold text-sky-500 drop-shadow-md animate-fade-in-up">
+                        {note.text}
+                      </p>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </section>
         </main>
       </div>
 
-      {/* 하단 플레이 바 (Seek bar 포함) */}
+      {/* 하단 플레이 바 */}
       <footer className={`h-24 border-t px-6 flex items-center justify-between z-10 ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
         <div className="flex items-center gap-3 w-1/4">
           <div className="w-12 h-12 bg-slate-200 dark:bg-slate-800 rounded-md flex items-center justify-center"><Music size={20} className="text-slate-400" /></div>
@@ -206,13 +254,9 @@ function App() {
             <button onClick={() => setIsRepeat(!isRepeat)} className={`transition ${isRepeat ? 'text-sky-500' : 'text-slate-400 hover:text-slate-600'}`}><Repeat size={18} /></button>
           </div>
           
-          {/* 🎯 탐색 바 (Seek bar) */}
           <div className="w-full flex items-center gap-3 text-xs text-slate-400 font-mono">
             <span>{Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}</span>
-            <input 
-              type="range" min="0" max={duration || 100} value={currentTime} onChange={handleSeek}
-              className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-sky-500 bg-slate-700" 
-            />
+            <input type="range" min="0" max={duration || 100} value={currentTime} onChange={handleSeek} className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-sky-500 bg-slate-700" />
             <span>{Math.floor(duration / 60)}:{(Math.floor(duration % 60)).toString().padStart(2, '0')}</span>
           </div>
         </div>
