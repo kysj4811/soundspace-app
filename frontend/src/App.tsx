@@ -13,7 +13,10 @@ function App() {
   const requestRef = useRef<number>(0);
 
   // 💾 상태 관리
-  const [volume, setVolume] = useState<number>(() => Number(localStorage.getItem('soundspace-volume')) || 50);
+  const [volume, setVolume] = useState<number>(() => {
+  const saved = localStorage.getItem('soundspace-volume');
+  return saved !== null ? Number(saved) : 50;
+});
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => (localStorage.getItem('soundspace-theme') || 'dark') === 'dark');
   const [currentSongIndex, setCurrentSongIndex] = useState<number>(() => Number(sessionStorage.getItem('soundspace-current-index')) || 0);
   const [isShuffle, setIsShuffle] = useState<boolean>(() => sessionStorage.getItem('soundspace-shuffle') === 'true');
