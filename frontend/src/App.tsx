@@ -10,7 +10,7 @@ function App() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number>(0);
 
   // 💾 상태 관리
   const [volume, setVolume] = useState<number>(() => Number(localStorage.getItem('soundspace-volume')) || 50);
